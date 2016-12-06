@@ -23,6 +23,11 @@ Ul*.txt
 .cproject
 .project
 .settings
+netanim-3.107/*.cpp
+netanim-3.107/Makefile
+netanim-3.107/*.o
+netanim-3.107/NetAnim
+netanim-3.107/*.moc
 #\.mob$
 #\.routes$
 #^doc/doxygen.log$
