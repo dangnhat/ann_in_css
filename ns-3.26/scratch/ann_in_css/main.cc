@@ -1,7 +1,6 @@
-/* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
+/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 /*
- * Copyright (c) 2009 MIRKO BANCHI
- * Copyright (c) 2015 University of Washington
+ * Copyright (c) 2010 CTTC
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -16,559 +15,264 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
- * Authors: Mirko Banchi <mk.banchi@gmail.com>
- *          Sebastien Deronne <sebastien.deronne@gmail.com>
- *          Tom Henderson <tomhend@u.washington.edu>
- *
- * Adapted from ht-wifi-network.cc example
+ * Author: Nicola Baldo <nbaldo@cttc.es>
+ * Author: Nhat Pham <nhatphd@kaist.ac.kr>
  */
-#include <sstream>
-#include <iomanip>
+#include <iostream>
 
-#include "ns3/core-module.h"
-#include "ns3/config-store-module.h"
-#include "ns3/network-module.h"
-#include "ns3/applications-module.h"
-#include "ns3/wifi-module.h"
-#include "ns3/mobility-module.h"
-#include "ns3/spectrum-module.h"
-#include "ns3/internet-module.h"
+#include <ns3/core-module.h>
+#include <ns3/network-module.h>
+#include <ns3/spectrum-model-ism2400MHz-res1MHz.h>
+#include <ns3/spectrum-model-300kHz-300GHz-log.h>
+#include <ns3/wifi-spectrum-value-helper.h>
+#include <ns3/multi-model-spectrum-channel.h>
+#include <ns3/waveform-generator.h>
+#include <ns3/spectrum-analyzer.h>
+#include <ns3/log.h>
+#include <string>
+#include <ns3/friis-spectrum-propagation-loss.h>
+#include <ns3/propagation-delay-model.h>
+#include <ns3/mobility-module.h>
+#include <ns3/spectrum-helper.h>
+#include <ns3/applications-module.h>
+#include <ns3/adhoc-aloha-noack-ideal-phy-helper.h>
+#include <ns3/waveform-generator-helper.h>
+#include <ns3/spectrum-analyzer-helper.h>
+#include <ns3/non-communicating-net-device.h>
+#include <ns3/microwave-oven-spectrum-value-helper.h>
 
-#include "acss_debug.h"
 #include "acss_anim.h"
-
-// This is a simple example of an IEEE 802.11n Wi-Fi network.
-//
-// The main use case is to enable and test SpectrumWifiPhy vs YansWifiPhy
-// for packet error ratio
-//
-// Network topology:
-//
-//  Wi-Fi 192.168.1.0
-//
-//   STA                  AP
-//    * <-- distance -->  *
-//    |                   |
-//    n1                  n2
-//
-// Users may vary the following command-line arguments in addition to the
-// attributes, global values, and default values typically available:
-//
-//    --simulationTime:  Simulation time in seconds [10]
-//    --udp:             UDP if set to 1, TCP otherwise [true]
-//    --distance:        meters separation between nodes [50]
-//    --index:           restrict index to single value between 0 and 31 [256]
-//    --wifiType:        select ns3::SpectrumWifiPhy or ns3::YansWifiPhy [ns3::SpectrumWifiPhy]
-//    --errorModelType:  select ns3::NistErrorRateModel or ns3::YansErrorRateModel [ns3::NistErrorRateModel]
-//    --enablePcap:      enable pcap output [false]
-//
-// By default, the program will step through 32 index values, corresponding
-// to the following MCS, channel width, and guard interval combinations:
-//   index 0-7:    MCS 0-7, long guard interval, 20 MHz channel
-//   index 8-15:   MCS 0-7, short guard interval, 20 MHz channel
-//   index 16-23:  MCS 0-7, long guard interval, 40 MHz channel
-//   index 24-31:  MCS 0-7, short guard interval, 40 MHz channel
-// and send 1000 UDP packets using each MCS, using the SpectrumWifiPhy and the
-// NistErrorRateModel, at a distance of 50 meters.  The program outputs
-// results such as:
-//
-// wifiType: ns3::SpectrumWifiPhy distance: 50m; sent: 1000
-// index   MCS Rate (Mb/s) Tput (Mb/s) Received Signal (dBm) Noise (dBm) SNR (dB)
-//     0     0       6.5      0.7776    1000    -77.6633    -100.966     23.3027
-//     1     1        13      0.7776    1000    -77.6633    -100.966     23.3027
-//     2     2      19.5      0.7776    1000    -77.6633    -100.966     23.3027
-//     3     3        26      0.7776    1000    -77.6633    -100.966     23.3027
-//  ...
-//
-// When UDP is used, the throughput will always be 0.7776 Mb/s since the
-// traffic generator does not attempt to match the maximum Phy data rate
-// but instead sends at a constant rate.  When TCP is used, the TCP flow
-// will exhibit different throughput depending on the index.
+#include "acss_debug.h"
 
 using namespace ns3;
 
-// Global variables for use in callbacks.
-double g_signalDbmAvg;
-double g_noiseDbmAvg;
-uint32_t g_samples;
-uint16_t g_channelNumber;
-uint32_t g_rate;
+NS_LOG_COMPONENT_DEFINE ("ANN in CSS");
 
-void MonitorSniffRx (Ptr<const Packet> packet, uint16_t channelFreqMhz,
-                     uint16_t channelNumber, uint32_t rate,
-                     WifiPreamble preamble, WifiTxVector txVector,
-                     struct mpduInfo aMpdu, struct signalNoiseDbm signalNoise)
+/* Global variables and definitions */
+/* CONFIGURATION */
+static const std::string animFileName[] = "test.xml";
+static const int numOfPUs = 3;
+static const int numOfSUs = 100;
+static const int numOfNoiseGenerator = 1;
+static const int simTime = 10; // in seconds
 
+static bool g_verbose = false;
+
+/* Static Functions */
+void
+PhyTxStartTrace (std::string context, Ptr<const Packet> p)
 {
-  g_samples++;
-  g_signalDbmAvg += ((signalNoise.signal - g_signalDbmAvg) / g_samples);
-  g_noiseDbmAvg += ((signalNoise.noise - g_noiseDbmAvg) / g_samples);
-  g_rate = rate;
-  g_channelNumber = channelNumber;
+  if (g_verbose)
+    {
+      std::cout << context << " PHY TX START p: " << p << std::endl;
+    }
 }
 
-NS_LOG_COMPONENT_DEFINE ("WifiSpectrumPerExample");
 
-int main (int argc, char *argv[])
+void
+PhyTxEndTrace (std::string context, Ptr<const Packet> p)
 {
-  bool udp = true;
-  double distance = 50;
-  double simulationTime = 10; //seconds
-  uint16_t index = 256;
-  std::string wifiType = "ns3::SpectrumWifiPhy";
-  std::string errorModelType = "ns3::NistErrorRateModel";
-  bool enablePcap = false;
-  const uint32_t tcpPacketSize = 1448;
+  if (g_verbose)
+    {
+      std::cout << context << " PHY TX END p: " << p << std::endl;
+    }
+}
 
+void
+PhyRxStartTrace (std::string context, Ptr<const Packet> p)
+{
+  if (g_verbose)
+    {
+      std::cout << context << " PHY RX START p:" << p << std::endl;
+    }
+}
+
+void
+PhyRxEndOkTrace (std::string context, Ptr<const Packet> p)
+{
+  if (g_verbose)
+    {
+      std::cout << context << " PHY RX END OK p:" << p << std::endl;
+    }
+}
+
+void
+PhyRxEndErrorTrace (std::string context, Ptr<const Packet> p)
+{
+  if (g_verbose)
+    {
+      std::cout << context << " PHY RX END ERROR p:" << p << std::endl;
+    }
+}
+
+
+void
+ReceivePacket (Ptr<Socket> socket)
+{
+  Ptr<Packet> packet;
+  uint64_t bytes = 0;
+  while ((packet = socket->Recv ()))
+    {
+      bytes += packet->GetSize ();
+    }
+  if (g_verbose)
+    {
+      std::cout << "SOCKET received " << bytes << " bytes" << std::endl;
+    }
+}
+
+Ptr<Socket>
+SetupPacketReceive (Ptr<Node> node)
+{
+  TypeId tid = TypeId::LookupByName ("ns3::PacketSocketFactory");
+  Ptr<Socket> sink = Socket::CreateSocket (node, tid);
+  sink->Bind ();
+  sink->SetRecvCallback (MakeCallback (&ReceivePacket));
+  return sink;
+}
+
+/* Main */
+int main (int argc, char** argv)
+{
   CommandLine cmd;
-  cmd.AddValue ("simulationTime", "Simulation time in seconds", simulationTime);
-  cmd.AddValue ("udp", "UDP if set to 1, TCP otherwise", udp);
-  cmd.AddValue ("distance", "meters separation between nodes", distance);
-  cmd.AddValue ("index", "restrict index to single value between 0 and 31", index);
-  cmd.AddValue ("wifiType", "select ns3::SpectrumWifiPhy or ns3::YansWifiPhy", wifiType);
-  cmd.AddValue ("errorModelType", "select ns3::NistErrorRateModel or ns3::YansErrorRateModel", errorModelType);
-  cmd.AddValue ("enablePcap", "enable pcap output", enablePcap);
-  cmd.Parse (argc,argv);
+  cmd.AddValue ("verbose", "Print trace information if true", g_verbose);
+  cmd.Parse (argc, argv);
 
-  uint16_t startIndex = 0;
-  uint16_t stopIndex = 31;
-  if (index < 32)
-    {
-      startIndex = index;
-      stopIndex = index;
-    }
+  /* Create and setup nodes locations and mobility model */
+  NodeContainer puNodes;
+  NodeContainer noiseGeneratorNodes;
+  NodeContainer suNodes;
+  NodeContainer allNodes;
 
-  std::cout << "wifiType: " << wifiType << " distance: " << distance << "m; sent: 1000 TxPower: 1 dBm (1.3 mW)" << std::endl;
-  std::cout << std::setw (5) << "index" <<
-    std::setw (6) << "MCS" <<
-    std::setw (12) << "Rate (Mb/s)" <<
-    std::setw (12) << "Tput (Mb/s)" <<
-    std::setw (10) << "Received " <<
-    std::setw (12) << "Signal (dBm)" <<
-    std::setw (12) << "Noise (dBm)" <<
-    std::setw (10) << "SNR (dB)" <<
-    std::endl;
-  for (uint16_t i = startIndex; i <= stopIndex; i++)
-    {
-      uint32_t payloadSize;
-      if (udp)
-        {
-          payloadSize = 972; // 1000 bytes IPv4
-        }
-      else
-        {
-          payloadSize = 1448; // 1500 bytes IPv6
-          Config::SetDefault ("ns3::TcpSocket::SegmentSize", UintegerValue (payloadSize));
-        }
+  puNodes.Create (numOfPUs);
+  noiseGeneratorNodes.Create (numOfNoiseGenerator);
+  suNodes.Create (numOfSUs);
+  allNodes.Add (puNodes);
+  allNodes.Add (noiseGeneratorNodes);
+  allNodes.Add (suNodes);
 
-      NodeContainer wifiStaNode;
-      wifiStaNode.Create (1);
-      NodeContainer wifiApNode;
-      wifiApNode.Create (1);
+  MobilityHelper mobility;
+  mobility.SetPositionAllocator ("ns3::RandomRectanglePositionAllocator",
+                           "X", StringValue ("ns3::UniformRandomVariable[Min=0|Max=100]"),
+                           "Y", StringValue ("ns3::UniformRandomVariable[Min=0|Max=100]"));
+  mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
+  mobility.Install (allNodes);
 
-      YansWifiPhyHelper phy = YansWifiPhyHelper::Default ();
-      SpectrumWifiPhyHelper spectrumPhy = SpectrumWifiPhyHelper::Default ();
-      if (wifiType == "ns3::YansWifiPhy")
-        {
-          YansWifiChannelHelper channel;
-          channel.AddPropagationLoss ("ns3::FriisPropagationLossModel");
-          channel.SetPropagationDelay ("ns3::ConstantSpeedPropagationDelayModel");
-          phy.SetChannel (channel.Create ());
-          phy.Set ("TxPowerStart", DoubleValue (1)); // dBm (1.26 mW)
-          phy.Set ("TxPowerEnd", DoubleValue (1));
+  /* Set up channel with default ConstantSpeedPropagationDelayModel and
+   * FriisSpectrumPropagationLossModel */
+  SpectrumChannelHelper channelHelper = SpectrumChannelHelper::Default ();
+  channelHelper.SetChannel ("ns3::MultiModelSpectrumChannel");
+  Ptr<SpectrumChannel> channel = channelHelper.Create ();
 
-          if (i <= 7)
-            {
-              phy.Set ("ShortGuardEnabled", BooleanValue (false));
-              phy.Set ("ChannelWidth", UintegerValue (20));
-            }
-          else if (i > 7 && i <= 15)
-            {
-              phy.Set ("ShortGuardEnabled", BooleanValue (true));
-              phy.Set ("ChannelWidth", UintegerValue (20));
-            }
-          else if (i > 15 && i <= 23)
-            {
-              phy.Set ("ShortGuardEnabled", BooleanValue (false));
-              phy.Set ("ChannelWidth", UintegerValue (40));
-            }
-          else
-            {
-              phy.Set ("ShortGuardEnabled", BooleanValue (true));
-              phy.Set ("ChannelWidth", UintegerValue (40));
-            }
-        }
-      else if (wifiType == "ns3::SpectrumWifiPhy")
-        {
-          //Bug 2460: CcaMode1Threshold default should be set to -62 dBm when using Spectrum
-          Config::SetDefault ("ns3::WifiPhy::CcaMode1Threshold", DoubleValue (-62.0));
+  /******************* Configure PU nodes *******************/
+  WifiSpectrumValue5MhzFactory sf;
 
-          Ptr<MultiModelSpectrumChannel> spectrumChannel
-            = CreateObject<MultiModelSpectrumChannel> ();
-          Ptr<FriisPropagationLossModel> lossModel
-            = CreateObject<FriisPropagationLossModel> ();
-          spectrumChannel->AddPropagationLossModel (lossModel);
+  double txPower = 0.1; // Watts
+  uint32_t channelNumber = 4;
+  Ptr<SpectrumValue> txPsd =  sf.CreateTxPowerSpectralDensity (txPower, channelNumber);
 
-          Ptr<ConstantSpeedPropagationDelayModel> delayModel
-            = CreateObject<ConstantSpeedPropagationDelayModel> ();
-          spectrumChannel->SetPropagationDelayModel (delayModel);
-
-          spectrumPhy.SetChannel (spectrumChannel);
-          spectrumPhy.SetErrorRateModel (errorModelType);
-          spectrumPhy.Set ("Frequency", UintegerValue (5180));
-          spectrumPhy.Set ("TxPowerStart", DoubleValue (1)); // dBm  (1.26 mW)
-          spectrumPhy.Set ("TxPowerEnd", DoubleValue (1));
-
-          if (i <= 7)
-            {
-              spectrumPhy.Set ("ShortGuardEnabled", BooleanValue (false));
-              spectrumPhy.Set ("ChannelWidth", UintegerValue (20));
-            }
-          else if (i > 7 && i <= 15)
-            {
-              spectrumPhy.Set ("ShortGuardEnabled", BooleanValue (true));
-              spectrumPhy.Set ("ChannelWidth", UintegerValue (20));
-            }
-          else if (i > 15 && i <= 23)
-            {
-              spectrumPhy.Set ("ShortGuardEnabled", BooleanValue (false));
-              spectrumPhy.Set ("ChannelWidth", UintegerValue (40));
-            }
-          else
-            {
-              spectrumPhy.Set ("ShortGuardEnabled", BooleanValue (true));
-              spectrumPhy.Set ("ChannelWidth", UintegerValue (40));
-            }
-        }
-      else
-        {
-          NS_FATAL_ERROR ("Unsupported WiFi type " << wifiType);
-        }
+  // for the noise, we use the Power Spectral Density of thermal noise
+  // at room temperature. The value of the PSD will be constant over the band of interest.
+  const double k = 1.381e-23; //Boltzmann's constant
+  const double T = 290; // temperature in Kelvin
+  double noisePsdValue = k * T; // watts per hertz
+  Ptr<SpectrumValue> noisePsd = sf.CreateConstant (noisePsdValue);
 
 
-      WifiHelper wifi;
-      wifi.SetStandard (WIFI_PHY_STANDARD_80211n_5GHZ);
-      WifiMacHelper mac;
+  AdhocAlohaNoackIdealPhyHelper adhocAlohaOfdmHelper;
+  adhocAlohaOfdmHelper.SetChannel (channel);
+  adhocAlohaOfdmHelper.SetTxPowerSpectralDensity (txPsd);
+  adhocAlohaOfdmHelper.SetNoisePowerSpectralDensity (noisePsd);
+  adhocAlohaOfdmHelper.SetPhyAttribute ("Rate", DataRateValue (DataRate ("1Mbps")));
+  NetDeviceContainer ofdmDevices = adhocAlohaOfdmHelper.Install (puNodes);
 
-      Ssid ssid = Ssid ("ns380211n");
+  PacketSocketHelper packetSocket;
+  packetSocket.Install (puNodes);
 
-      double datarate = 0;
-      StringValue DataRate;
-      if (i == 0)
-        {
-          DataRate = StringValue ("HtMcs0");
-          datarate = 6.5;
-        }
-      else if (i == 1)
-        {
-          DataRate = StringValue ("HtMcs1");
-          datarate = 13;
-        }
-      else if (i == 2)
-        {
-          DataRate = StringValue ("HtMcs2");
-          datarate = 19.5;
-        }
-      else if (i == 3)
-        {
-          DataRate = StringValue ("HtMcs3");
-          datarate = 26;
-        }
-      else if (i == 4)
-        {
-          DataRate = StringValue ("HtMcs4");
-          datarate = 39;
-        }
-      else if (i == 5)
-        {
-          DataRate = StringValue ("HtMcs5");
-          datarate = 52;
-        }
-      else if (i == 6)
-        {
-          DataRate = StringValue ("HtMcs6");
-          datarate = 58.5;
-        }
-      else if (i == 7)
-        {
-          DataRate = StringValue ("HtMcs7");
-          datarate = 65;
-        }
-      else if (i == 8)
-        {
-          DataRate = StringValue ("HtMcs0");
-          datarate = 7.2;
-        }
-      else if (i == 9)
-        {
-          DataRate = StringValue ("HtMcs1");
-          datarate = 14.4;
-        }
-      else if (i == 10)
-        {
-          DataRate = StringValue ("HtMcs2");
-          datarate = 21.7;
-        }
-      else if (i == 11)
-        {
-          DataRate = StringValue ("HtMcs3");
-          datarate = 28.9;
-        }
-      else if (i == 12)
-        {
-          DataRate = StringValue ("HtMcs4");
-          datarate = 43.3;
-        }
-      else if (i == 13)
-        {
-          DataRate = StringValue ("HtMcs5");
-          datarate = 57.8;
-        }
-      else if (i == 14)
-        {
-          DataRate = StringValue ("HtMcs6");
-          datarate = 65;
-        }
-      else if (i == 15)
-        {
-          DataRate = StringValue ("HtMcs7");
-          datarate = 72.2;
-        }
-      else if (i == 16)
-        {
-          DataRate = StringValue ("HtMcs0");
-          datarate = 13.5;
-        }
-      else if (i == 17)
-        {
-          DataRate = StringValue ("HtMcs1");
-          datarate = 27;
-        }
-      else if (i == 18)
-        {
-          DataRate = StringValue ("HtMcs2");
-          datarate = 40.5;
-        }
-      else if (i == 19)
-        {
-          DataRate = StringValue ("HtMcs3");
-          datarate = 54;
-        }
-      else if (i == 20)
-        {
-          DataRate = StringValue ("HtMcs4");
-          datarate = 81;
-        }
-      else if (i == 21)
-        {
-          DataRate = StringValue ("HtMcs5");
-          datarate = 108;
-        }
-      else if (i == 22)
-        {
-          DataRate = StringValue ("HtMcs6");
-          datarate = 121.5;
-        }
-      else if (i == 23)
-        {
-          DataRate = StringValue ("HtMcs7");
-          datarate = 135;
-        }
-      else if (i == 24)
-        {
-          DataRate = StringValue ("HtMcs0");
-          datarate = 15;
-        }
-      else if (i == 25)
-        {
-          DataRate = StringValue ("HtMcs1");
-          datarate = 30;
-        }
-      else if (i == 26)
-        {
-          DataRate = StringValue ("HtMcs2");
-          datarate = 45;
-        }
-      else if (i == 27)
-        {
-          DataRate = StringValue ("HtMcs3");
-          datarate = 60;
-        }
-      else if (i == 28)
-        {
-          DataRate = StringValue ("HtMcs4");
-          datarate = 90;
-        }
-      else if (i == 29)
-        {
-          DataRate = StringValue ("HtMcs5");
-          datarate = 120;
-        }
-      else if (i == 30)
-        {
-          DataRate = StringValue ("HtMcs6");
-          datarate = 135;
-        }
-      else
-        {
-          DataRate = StringValue ("HtMcs7");
-          datarate = 150;
-        }
+  PacketSocketAddress socket;
+  socket.SetSingleDevice (ofdmDevices.Get (0)->GetIfIndex ());
+  socket.SetPhysicalAddress (ofdmDevices.Get (1)->GetAddress ());
+  socket.SetProtocol (1);
 
-      wifi.SetRemoteStationManager ("ns3::ConstantRateWifiManager","DataMode", DataRate,
-                                    "ControlMode", DataRate);
+  OnOffHelper onoff ("ns3::PacketSocketFactory", Address (socket));
+  onoff.SetAttribute ("OnTime", StringValue ("ns3::ExponentialRandomVariable[Mean=0.04]"));
+  onoff.SetAttribute ("OffTime", StringValue ("ns3::ExponentialRandomVariable[Mean=0.01]"));
+  onoff.SetAttribute ("DataRate", DataRateValue (DataRate ("0.4Mbps")));
+  onoff.SetAttribute ("PacketSize", UintegerValue (1500));
 
-      NetDeviceContainer staDevice;
-      NetDeviceContainer apDevice;
+  ApplicationContainer apps = onoff.Install (puNodes.Get (0));
+  apps.Start (Seconds (0.0));
+  apps.Stop (Seconds (simTime));
 
-      if (wifiType == "ns3::YansWifiPhy")
-        {
-          mac.SetType ("ns3::StaWifiMac",
-                       "Ssid", SsidValue (ssid),
-                       "ActiveProbing", BooleanValue (false));
-          staDevice = wifi.Install (phy, mac, wifiStaNode);
-          mac.SetType ("ns3::ApWifiMac",
-                       "Ssid", SsidValue (ssid));
-          apDevice = wifi.Install (phy, mac, wifiApNode);
+  Ptr<Socket> recvSink = SetupPacketReceive (puNodes.Get (1));
 
-        }
-      else if (wifiType == "ns3::SpectrumWifiPhy")
-        {
-          mac.SetType ("ns3::StaWifiMac",
-                       "Ssid", SsidValue (ssid),
-                       "ActiveProbing", BooleanValue (false));
-          staDevice = wifi.Install (spectrumPhy, mac, wifiStaNode);
-          mac.SetType ("ns3::ApWifiMac",
-                       "Ssid", SsidValue (ssid));
-          apDevice = wifi.Install (spectrumPhy, mac, wifiApNode);
-        }
+  /******************* Configure noise generator *******************/
+  Ptr<SpectrumValue> mwoPsd =  MicrowaveOvenSpectrumValueHelper::CreatePowerSpectralDensityMwo1 ();
+  NS_LOG_INFO ("mwoPsd : " << *mwoPsd);
 
-      // mobility.
-      MobilityHelper mobility;
-      Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator> ();
+  WaveformGeneratorHelper waveformGeneratorHelper;
+  waveformGeneratorHelper.SetChannel (channel);
+  waveformGeneratorHelper.SetTxPowerSpectralDensity (mwoPsd);
 
-      positionAlloc->Add (Vector (0.0, 0.0, 0.0));
-      positionAlloc->Add (Vector (distance, 0.0, 0.0));
-      mobility.SetPositionAllocator (positionAlloc);
+  waveformGeneratorHelper.SetPhyAttribute ("Period", TimeValue (Seconds (1.0 / 60)));   // corresponds to 60 Hz
+  waveformGeneratorHelper.SetPhyAttribute ("DutyCycle", DoubleValue (0.5));
+  NetDeviceContainer waveformGeneratorDevices = waveformGeneratorHelper.Install (noiseGeneratorNodes);
 
-      mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
+  Simulator::Schedule (Seconds (0), &WaveformGenerator::Start,
+                       waveformGeneratorDevices.Get (0)->GetObject<NonCommunicatingNetDevice> ()->GetPhy ()->GetObject<WaveformGenerator> ());
 
-      mobility.Install (wifiApNode);
-      mobility.Install (wifiStaNode);
 
-      /* Internet stack*/
-      InternetStackHelper stack;
-      stack.Install (wifiApNode);
-      stack.Install (wifiStaNode);
+  /******************* Configure spectrum sensing nodes *******************/
+  SpectrumAnalyzerHelper spectrumAnalyzerHelper;
+  spectrumAnalyzerHelper.SetChannel (channel);
+  spectrumAnalyzerHelper.SetRxSpectrumModel (SpectrumModelIsm2400MhzRes1Mhz);
+  spectrumAnalyzerHelper.SetPhyAttribute ("Resolution", TimeValue (MilliSeconds (100)));
+  spectrumAnalyzerHelper.SetPhyAttribute ("NoisePowerSpectralDensity", DoubleValue (1e-15));  // -120 dBm/Hz
+  spectrumAnalyzerHelper.EnableAsciiAll ("outputs/spectrum-analyzer-output");
+  NetDeviceContainer spectrumAnalyzerDevices = spectrumAnalyzerHelper.Install (suNodes);
 
-      Ipv4AddressHelper address;
+  /*
+    you can get a nice plot of the output of SpectrumAnalyzer with this gnuplot script:
 
-      address.SetBase ("192.168.1.0", "255.255.255.0");
-      Ipv4InterfaceContainer staNodeInterface;
-      Ipv4InterfaceContainer apNodeInterface;
+    unset surface
+    set pm3d at s
+    set palette
+    set key off
+    set view 50,50
+    set xlabel "time (ms)"
+    set ylabel "freq (MHz)"
+    set zlabel "PSD (dBW/Hz)" offset 15,0,0
+    splot "./spectrum-analyzer-output-3-0.tr" using ($1*1000.0):($2/1e6):(10*log10($3))
+  */
 
-      staNodeInterface = address.Assign (staDevice);
-      apNodeInterface = address.Assign (apDevice);
 
-      /* Setting applications */
-      ApplicationContainer serverApp, sinkApp;
-      if (udp)
-        {
-          //UDP flow
-          UdpServerHelper myServer (9);
-          serverApp = myServer.Install (wifiStaNode.Get (0));
-          serverApp.Start (Seconds (0.0));
-          serverApp.Stop (Seconds (simulationTime + 1));
+  Config::Connect ("/NodeList/*/DeviceList/*/Phy/TxStart", MakeCallback (&PhyTxStartTrace));
+  Config::Connect ("/NodeList/*/DeviceList/*/Phy/TxEnd", MakeCallback (&PhyTxEndTrace));
+  Config::Connect ("/NodeList/*/DeviceList/*/Phy/RxStart", MakeCallback (&PhyRxStartTrace));
+  Config::Connect ("/NodeList/*/DeviceList/*/Phy/RxEndOk", MakeCallback (&PhyRxEndOkTrace));
+  Config::Connect ("/NodeList/*/DeviceList/*/Phy/RxEndError", MakeCallback (&PhyRxEndErrorTrace));
 
-          UdpClientHelper myClient (staNodeInterface.GetAddress (0), 9);
-          myClient.SetAttribute ("MaxPackets", UintegerValue (1000));
-          myClient.SetAttribute ("Interval", TimeValue (MilliSeconds (5)));
-          myClient.SetAttribute ("PacketSize", UintegerValue (payloadSize));
+  /* Anim */
+  acss_anim test_anim("test.xml");
 
-          ApplicationContainer clientApp = myClient.Install (wifiApNode.Get (0));
-          clientApp.Start (Seconds (1.0));
-          clientApp.Stop (Seconds (simulationTime + 1));
-        }
-      else
-        {
-          //TCP flow
-          uint16_t port = 50000;
-          Address apLocalAddress (InetSocketAddress (Ipv4Address::GetAny (), port));
-          PacketSinkHelper packetSinkHelper ("ns3::TcpSocketFactory", apLocalAddress);
-          sinkApp = packetSinkHelper.Install (wifiStaNode.Get (0));
+//  for (int count = 0; count < numOfPUs; count++) {
+//      test_anim.update_pu_icon(puNodes.Get(count)->GetId());
+//  }
+//
+//  for (int count = 0; count < numOfSUs; count++) {
+//      test_anim.update_su_icon(suNodes.Get(count)->GetId());
+//  }
+//
+//  for (int count = 0; count < numOfSUs; count++) {
+//      test_anim.update_noise_gen_icon(noiseGeneratorNodes.Get(count)->GetId());
+//  }
 
-          sinkApp.Start (Seconds (0.0));
-          sinkApp.Stop (Seconds (simulationTime + 1));
+  Simulator::Stop (Seconds (simTime));
 
-          OnOffHelper onoff ("ns3::TcpSocketFactory",Ipv4Address::GetAny ());
-          onoff.SetAttribute ("OnTime",  StringValue ("ns3::ConstantRandomVariable[Constant=1]"));
-          onoff.SetAttribute ("OffTime", StringValue ("ns3::ConstantRandomVariable[Constant=0]"));
-          onoff.SetAttribute ("PacketSize", UintegerValue (payloadSize));
-          onoff.SetAttribute ("DataRate", DataRateValue (1000000000)); //bit/s
-          ApplicationContainer apps;
+  Simulator::Run ();
 
-          AddressValue remoteAddress (InetSocketAddress (staNodeInterface.GetAddress (0), port));
-          onoff.SetAttribute ("Remote", remoteAddress);
-          apps.Add (onoff.Install (wifiApNode.Get (0)));
-          apps.Start (Seconds (1.0));
-          apps.Stop (Seconds (simulationTime + 1));
-        }
+  Simulator::Destroy ();
 
-      Config::ConnectWithoutContext ("/NodeList/0/DeviceList/*/Phy/MonitorSnifferRx", MakeCallback (&MonitorSniffRx));
-
-      if (enablePcap)
-        {
-          std::stringstream ss;
-          ss << "wifi-spectrum-per-example-" << i;
-          phy.EnablePcap (ss.str (), apDevice);
-        }
-      g_signalDbmAvg = 0;
-      g_noiseDbmAvg = 0;
-      g_samples = 0;
-      g_channelNumber = 0;
-      g_rate = 0;
-
-      /* NetAnim */
-      lte_anim test_anim("test.xml");
-
-      Simulator::Stop (Seconds (simulationTime + 1));
-      Simulator::Run ();
-
-      double throughput = 0;
-      uint32_t totalPacketsThrough = 0;
-      if (udp)
-        {
-          //UDP
-          totalPacketsThrough = DynamicCast<UdpServer> (serverApp.Get (0))->GetReceived ();
-          throughput = totalPacketsThrough * payloadSize * 8 / (simulationTime * 1000000.0); //Mbit/s
-        }
-      else
-        {
-          //TCP
-          uint32_t totalBytesRx = DynamicCast<PacketSink> (sinkApp.Get (0))->GetTotalRx ();
-          totalPacketsThrough = totalBytesRx / tcpPacketSize;
-          throughput = totalBytesRx * 8 / (simulationTime * 1000000.0); //Mbit/s
-        }
-      std::cout << std::setw (5) << i <<
-        std::setw (6) << (i % 8) <<
-        std::setw (10) << datarate <<
-        std::setw (12) << throughput <<
-        std::setw (8) << totalPacketsThrough;
-      if (totalPacketsThrough > 0)
-        {
-          std::cout << std::setw (12) << g_signalDbmAvg <<
-            std::setw (12) << g_noiseDbmAvg <<
-            std::setw (12) << (g_signalDbmAvg - g_noiseDbmAvg) <<
-            std::endl;
-        }
-      else
-        {
-          std::cout << std::setw (12) << "N/A" <<
-            std::setw (12) << "N/A" <<
-            std::setw (12) << "N/A" <<
-            std::endl;
-        }
-      Simulator::Destroy ();
-    }
-  return 0;
 }
+
+

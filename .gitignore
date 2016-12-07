@@ -29,6 +29,7 @@ netanim-3.107/*.o
 netanim-3.107/NetAnim
 netanim-3.107/*.moc
 *.xml
+outputs
 #\.mob$
 #\.routes$
 #^doc/doxygen.log$

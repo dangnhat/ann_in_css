@@ -17,11 +17,11 @@
 using namespace ns3;
 
 /* Namespace */
-namespace lte_anim_ns {
+namespace acss_anim_ns {
 }
 
 /* Class */
-class lte_anim {
+class acss_anim {
 
 public:
   /**
@@ -33,16 +33,39 @@ public:
    *
    * @param[in]   anim_file_name, file name for output NetAnim XML file.
    */
-  lte_anim(const std::string anim_file_name);
+  acss_anim(const std::string anim_file_name);
 
   /**
    * @brief   Destructor.
    *          Delete AnimationInterface object.
    */
-  ~lte_anim(void);
+  ~acss_anim(void);
+
+  /**
+   * @brief   Update Primary Users icon to an object.
+   *
+   * @param[in]   node_id, Node id of the object.
+   */
+  void update_pu_icon(uint32_t node_id);
+
+  /**
+   * @brief   Update Secondary User icon to an object.
+   *
+   * @param[in]   node_id, Node id of the object.
+   */
+  void update_su_icon(uint32_t node_id);
+
+  /**
+   * @brief   Update Noise Generator icon to an object.
+   *
+   * @param[in]   node_id, Node id of the object.
+   */
+  void update_noise_gen_icon(uint32_t node_id);
 
 private:
   AnimationInterface* anim_p;
+
+  uint32_t pu_icon_id, su_icon_id, noise_gen_icon_id;
 };
 
 #endif /* ACSS_ANIM_H_ */
