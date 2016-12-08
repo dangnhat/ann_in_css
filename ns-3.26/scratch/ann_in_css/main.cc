@@ -240,53 +240,32 @@ int main (int argc, char** argv)
   PacketSocketHelper packetSocket;
   packetSocket.Install (puNodes);
 
-  /* Setup simulation to send data from node 1 to node 0 */
-  PacketSocketAddress socketFrom1to0;
-  socketFrom1to0.SetSingleDevice (ofdmDevices.Get (1)->GetIfIndex ());
-  socketFrom1to0.SetPhysicalAddress (ofdmDevices.Get (0)->GetAddress ());
-  socketFrom1to0.SetProtocol (1);
+  PacketSocketAddress socketTo0[numOfPUs - 1];
+  OnOffHelper onOffs[numOfPUs - 1];
+  ApplicationContainer apps[numOfPUs - 1];
 
-  OnOffHelper onoff ("ns3::PacketSocketFactory", Address (socketFrom1to0));
-  onoff.SetAttribute ("OnTime", StringValue ("ns3::UniformRandomVariable[Min=2|Max=10]"));
-  onoff.SetAttribute ("OffTime", StringValue ("ns3::UniformRandomVariable[Min=7|Max=10]"));
-  onoff.SetAttribute ("DataRate", DataRateValue (DataRate ("10Kbps")));
-  onoff.SetAttribute ("PacketSize", UintegerValue (1500));
+  Ptr<UniformRandomVariable> startTimeRNG = CreateObject<UniformRandomVariable> ();
+  startTimeRNG->SetAttribute ("Min", DoubleValue (0));
+  startTimeRNG->SetAttribute ("Max", DoubleValue (simTime/2));
 
-  ApplicationContainer apps = onoff.Install (puNodes.Get (1));
-  apps.Start (Seconds (0.0));
-  apps.Stop (Seconds (simTime));
+  Ptr<UniformRandomVariable> endTimeRNG = CreateObject<UniformRandomVariable> ();
+  endTimeRNG->SetAttribute ("Min", DoubleValue (simTime/2));
+  endTimeRNG->SetAttribute ("Max", DoubleValue (simTime));
 
-  /* Setup simulation to send data from node 2 to node 0 */
-  PacketSocketAddress socketFrom2to0;
-  socketFrom2to0.SetSingleDevice (ofdmDevices.Get (2)->GetIfIndex ());
-  socketFrom2to0.SetPhysicalAddress (ofdmDevices.Get (0)->GetAddress ());
-  socketFrom2to0.SetProtocol (1);
+  for (int pu_count = 1; pu_count < (numOfPUs-1); pu_count++) {
+      socketTo0[pu_count].SetSingleDevice (ofdmDevices.Get (pu_count)->GetIfIndex ());
+      socketTo0[pu_count].SetPhysicalAddress (ofdmDevices.Get (0)->GetAddress ());
+      socketTo0[pu_count].SetProtocol (1);
 
-  OnOffHelper onoff2 ("ns3::PacketSocketFactory", Address (socketFrom2to0));
-  onoff2.SetAttribute ("OnTime", StringValue ("ns3::UniformRandomVariable[Min=2|Max=10]"));
-  onoff2.SetAttribute ("OffTime", StringValue ("ns3::UniformRandomVariable[Min=5|Max=10]"));
-  onoff2.SetAttribute ("DataRate", DataRateValue (DataRate ("10Kbps")));
-  onoff2.SetAttribute ("PacketSize", UintegerValue (1500));
+      onOffs[pu_count].SetAttribute ("OnTime", StringValue ("ns3::UniformRandomVariable[Min=2|Max=5]"));
+      onOffs[pu_count].SetAttribute ("OffTime", StringValue ("ns3::UniformRandomVariable[Min=10|Max=15]"));
+      onOffs[pu_count].SetAttribute ("DataRate", DataRateValue (DataRate ("10Kbps")));
+      onOffs[pu_count].SetAttribute ("PacketSize", UintegerValue (1500));
 
-  ApplicationContainer apps2 = onoff2.Install (puNodes.Get (2));
-  apps2.Start (Seconds (simTime/3));
-  apps2.Stop (Seconds (2*simTime/3));
-
-  /* Setup simulation to send data from node 3 to node 0 */
-  PacketSocketAddress socketFrom3to0;
-  socketFrom3to0.SetSingleDevice (ofdmDevices.Get (3)->GetIfIndex ());
-  socketFrom3to0.SetPhysicalAddress (ofdmDevices.Get (0)->GetAddress ());
-  socketFrom3to0.SetProtocol (1);
-
-  OnOffHelper onoff3 ("ns3::PacketSocketFactory", Address (socketFrom3to0));
-  onoff3.SetAttribute ("OnTime", StringValue ("ns3::UniformRandomVariable[Min=2|Max=10]"));
-  onoff3.SetAttribute ("OffTime", StringValue ("ns3::UniformRandomVariable[Min=2|Max=10]"));
-  onoff3.SetAttribute ("DataRate", DataRateValue (DataRate ("10Kbps")));
-  onoff3.SetAttribute ("PacketSize", UintegerValue (1500));
-
-  ApplicationContainer apps3 = onoff3.Install (puNodes.Get (3));
-  apps3.Start (Seconds (2*simTime/3 + 1));
-  apps3.Stop (Seconds (simTime));
+      apps[pu_count] = onOffs[pu_count].Install (puNodes.Get (pu_count));
+      apps[pu_count].Start (Seconds (startTimeRNG->GetValue ()));
+      apps[pu_count].Stop (Seconds (endTimeRNG->GetValue ()));
+  }
 
   Ptr<Socket> recvSink = SetupPacketReceive (puNodes.Get (0));
 
@@ -367,57 +346,57 @@ int main (int argc, char** argv)
 //
 //  }
 
-  /* Extract SUs energy vectors */
-  ofstream energyVectorFile;
-  energyVectorFile.open(suEngeryVectorFileName, ios::out | ios::trunc);
-
-  /* Open SUs trace files */
-  ifstream suFiles[numOfSUs];
-
-  for (int count = 0; count < numOfSUs; count++) {
-    string filename = suSensingFileNameFrefix;
-    filename +="-" + SSTR(suNodes.Get(count)->GetId()) + suSensingFileNameSuffix;
-
-    cout << "opening " << filename << endl;
-    suFiles[count].open(filename.c_str());
-  }
-
-  for (double time_frame = 0.1; time_frame < simTime; time_frame += 0.1) {
-    /* Write timeframe to output file */
-    energyVectorFile << time_frame << " ";
-    cout << "at time frame " << time_frame << endl;
-
-    for (int count = 0; count < numOfSUs; count++) {
-      if (suFiles[count].is_open()) {
-        double readTimeFrame;
-        double readFreq, readPower;
-
-        while (!suFiles[count].eof()) {
-          suFiles[count] >> readTimeFrame >> readFreq >> readPower;
-
-          if ((readFreq == 2.435e+09)) {
-            cout << "SU " << SSTR(suNodes.Get(count)->GetId()) << " found a right energy" << endl;
-            cout << readTimeFrame << " " << readFreq << " " << readPower << endl;
-            energyVectorFile << readPower << " ";
-
-            break;
-          }
-        }
-      }
-      else {
-        cout << "Can't open su " << suNodes.Get(count)->GetId() << endl;
-      }
-    }
-
-    /* end one energy vector */
-    energyVectorFile << endl;
-  }
-
-  for (int count = 0; count < numOfSUs; count++) {
-    suFiles[count].close();
-  }
-
-  energyVectorFile.close();
-}
+//  /* Extract SUs energy vectors */
+//  ofstream energyVectorFile;
+//  energyVectorFile.open(suEngeryVectorFileName, ios::out | ios::trunc);
+//
+//  /* Open SUs trace files */
+//  ifstream suFiles[numOfSUs];
+//
+//  for (int count = 0; count < numOfSUs; count++) {
+//    string filename = suSensingFileNameFrefix;
+//    filename +="-" + SSTR(suNodes.Get(count)->GetId()) + suSensingFileNameSuffix;
+//
+//    cout << "opening " << filename << endl;
+//    suFiles[count].open(filename.c_str());
+//  }
+//
+//  for (double time_frame = 0.1; time_frame < simTime; time_frame += 0.1) {
+//    /* Write timeframe to output file */
+//    energyVectorFile << time_frame << " ";
+//    cout << "at time frame " << time_frame << endl;
+//
+//    for (int count = 0; count < numOfSUs; count++) {
+//      if (suFiles[count].is_open()) {
+//        double readTimeFrame;
+//        double readFreq, readPower;
+//
+//        while (!suFiles[count].eof()) {
+//          suFiles[count] >> readTimeFrame >> readFreq >> readPower;
+//
+//          if ((readFreq == 2.435e+09)) {
+//            cout << "SU " << SSTR(suNodes.Get(count)->GetId()) << " found a right energy" << endl;
+//            cout << readTimeFrame << " " << readFreq << " " << readPower << endl;
+//            energyVectorFile << readPower << " ";
+//
+//            break;
+//          }
+//        }
+//      }
+//      else {
+//        cout << "Can't open su " << suNodes.Get(count)->GetId() << endl;
+//      }
+//    }
+//
+//    /* end one energy vector */
+//    energyVectorFile << endl;
+//  }
+//
+//  for (int count = 0; count < numOfSUs; count++) {
+//    suFiles[count].close();
+//  }
+//
+//  energyVectorFile.close();
+//}
 
 
