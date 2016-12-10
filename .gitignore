@@ -30,8 +30,8 @@ netanim-3.107/NetAnim
 netanim-3.107/*.moc
 *.xml
 outputs/*
-PUs/*.tr
-SUs/*.tr
+ns-3.26/scratch/ann_in_css/PUs/*.tr
+ns-3.26/scratch/ann_in_css/SUs/*.tr
 bin
 #\.mob$
 #\.routes$
