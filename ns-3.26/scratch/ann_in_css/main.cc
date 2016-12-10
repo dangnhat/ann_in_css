@@ -45,63 +45,101 @@
 #include "acss_debug.h"
 
 using namespace ns3;
+using namespace std;
 
 NS_LOG_COMPONENT_DEFINE ("ANN in CSS");
 
 /* Global variables and definitions */
 /* CONFIGURATION */
-static const std::string animFileName[] = "test.xml";
-static const int numOfPUs = 3;
-static const int numOfSUs = 100;
+static const char animFileName[] = "test.xml";
+static const int numOfPUs = 4;
 static const int numOfNoiseGenerator = 1;
-static const int simTime = 10; // in seconds
+static const int numOfSUs = 20;
+static const int simTime = 120; // in seconds
 
-static bool g_verbose = false;
+static const char puActivityFileNamePrefix[] = "PUs/pu_activity_";
+static const char puActivityFileNameSuffix[] = ".tr";
+static const char puTimeFrameFilename[] = "PUs/pu_activity_timeframes.tr";
+
+static const char suSensingFileNameFrefix[] = "SUs/spectrum-analyzer-output";
+static const char suSensingFileNameSuffix[] = "-0.tr";
+static const char suEngeryVectorFileName[] = "SUs/energy_vectors.tr";
+
+static bool g_verbose = true;
+
+#define SSTR( x ) static_cast< ostringstream & >( \
+        ( ostringstream() << dec << x ) ).str()
 
 /* Static Functions */
 void
-PhyTxStartTrace (std::string context, Ptr<const Packet> p)
+PhyTxStartTrace (string context, Ptr<const Packet> p)
 {
-  if (g_verbose)
-    {
-      std::cout << context << " PHY TX START p: " << p << std::endl;
-    }
+  string contextOfNoiseGen = "/NodeList/" + SSTR(numOfPUs) + "/DeviceList/0/Phy/TxStart";
+  const char *context_chars;
+  context_chars = context.c_str();
+
+  if(context.compare(contextOfNoiseGen) != 0) {
+    cout << Simulator::Now().GetSeconds() << " " << context << " PHY TX START p: " << p << endl;
+
+    /* Write to pu activity file */
+    ofstream puFile;
+    string filename = puActivityFileNamePrefix + SSTR(context_chars[10]) + puActivityFileNameSuffix;
+
+    puFile.open(filename.c_str(), ios::out | ios::app | ios::ate);
+
+    puFile << "S " << Simulator::Now().GetSeconds() << endl;
+
+    puFile.close();
+  }
 }
 
 
 void
-PhyTxEndTrace (std::string context, Ptr<const Packet> p)
+PhyTxEndTrace (string context, Ptr<const Packet> p)
+{
+  string contextOfNoiseGen = "/NodeList/" + SSTR(numOfPUs) + "/DeviceList/0/Phy/TxEnd";
+  const char *context_chars;
+  context_chars = context.c_str();
+
+  if(context.compare(contextOfNoiseGen) != 0) {
+    cout << Simulator::Now().GetSeconds() << " " << context << " PHY TX END p: " << p << endl;
+
+    /* Write to pu activity file */
+    ofstream puFile;
+    string filename = puActivityFileNamePrefix + SSTR(context_chars[10]) + puActivityFileNameSuffix;
+
+    puFile.open(filename.c_str(), ios::out | ios::app | ios::ate);
+
+    puFile << "E " << Simulator::Now().GetSeconds() << endl;
+
+    puFile.close();
+  }
+}
+
+void
+PhyRxStartTrace (string context, Ptr<const Packet> p)
 {
   if (g_verbose)
     {
-      std::cout << context << " PHY TX END p: " << p << std::endl;
+      cout << context << " PHY RX START p:" << p << endl;
     }
 }
 
 void
-PhyRxStartTrace (std::string context, Ptr<const Packet> p)
+PhyRxEndOkTrace (string context, Ptr<const Packet> p)
 {
   if (g_verbose)
     {
-      std::cout << context << " PHY RX START p:" << p << std::endl;
+      cout << context << " PHY RX END OK p:" << p << endl;
     }
 }
 
 void
-PhyRxEndOkTrace (std::string context, Ptr<const Packet> p)
+PhyRxEndErrorTrace (string context, Ptr<const Packet> p)
 {
   if (g_verbose)
     {
-      std::cout << context << " PHY RX END OK p:" << p << std::endl;
-    }
-}
-
-void
-PhyRxEndErrorTrace (std::string context, Ptr<const Packet> p)
-{
-  if (g_verbose)
-    {
-      std::cout << context << " PHY RX END ERROR p:" << p << std::endl;
+      cout << context << " PHY RX END ERROR p:" << p << endl;
     }
 }
 
@@ -117,7 +155,7 @@ ReceivePacket (Ptr<Socket> socket)
     }
   if (g_verbose)
     {
-      std::cout << "SOCKET received " << bytes << " bytes" << std::endl;
+      cout << "SOCKET received " << bytes << " bytes" << endl;
     }
 }
 
@@ -138,6 +176,19 @@ int main (int argc, char** argv)
   cmd.AddValue ("verbose", "Print trace information if true", g_verbose);
   cmd.Parse (argc, argv);
 
+  /* Truncate PU activity files */
+  ofstream puFile;
+
+  for (int count = 0; count < numOfPUs; count++) {
+    string filename = puActivityFileNamePrefix + SSTR(count) + puActivityFileNameSuffix;
+
+    puFile.open(filename.c_str(), ios::out | ios::trunc);
+    puFile.close();
+  }
+
+  /* Enable LOG */
+  //LogComponentEnable("OnOffApplication", LOG_LEVEL_LOGIC);
+
   /* Create and setup nodes locations and mobility model */
   NodeContainer puNodes;
   NodeContainer noiseGeneratorNodes;
@@ -153,8 +204,8 @@ int main (int argc, char** argv)
 
   MobilityHelper mobility;
   mobility.SetPositionAllocator ("ns3::RandomRectanglePositionAllocator",
-                           "X", StringValue ("ns3::UniformRandomVariable[Min=0|Max=100]"),
-                           "Y", StringValue ("ns3::UniformRandomVariable[Min=0|Max=100]"));
+                           "X", StringValue ("ns3::UniformRandomVariable[Min=0|Max=50]"),
+                           "Y", StringValue ("ns3::UniformRandomVariable[Min=0|Max=50]"));
   mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
   mobility.Install (allNodes);
 
@@ -167,7 +218,7 @@ int main (int argc, char** argv)
   /******************* Configure PU nodes *******************/
   WifiSpectrumValue5MhzFactory sf;
 
-  double txPower = 0.1; // Watts
+  double txPower = 0.5; // Watts
   uint32_t channelNumber = 4;
   Ptr<SpectrumValue> txPsd =  sf.CreateTxPowerSpectralDensity (txPower, channelNumber);
 
@@ -183,28 +234,61 @@ int main (int argc, char** argv)
   adhocAlohaOfdmHelper.SetChannel (channel);
   adhocAlohaOfdmHelper.SetTxPowerSpectralDensity (txPsd);
   adhocAlohaOfdmHelper.SetNoisePowerSpectralDensity (noisePsd);
-  adhocAlohaOfdmHelper.SetPhyAttribute ("Rate", DataRateValue (DataRate ("1Mbps")));
+  adhocAlohaOfdmHelper.SetPhyAttribute ("Rate", DataRateValue (DataRate ("10Kbps")));
   NetDeviceContainer ofdmDevices = adhocAlohaOfdmHelper.Install (puNodes);
 
   PacketSocketHelper packetSocket;
   packetSocket.Install (puNodes);
 
-  PacketSocketAddress socket;
-  socket.SetSingleDevice (ofdmDevices.Get (0)->GetIfIndex ());
-  socket.SetPhysicalAddress (ofdmDevices.Get (1)->GetAddress ());
-  socket.SetProtocol (1);
+  /* Setup simulation to send data from node 1 to node 0 */
+  PacketSocketAddress socketFrom1to0;
+  socketFrom1to0.SetSingleDevice (ofdmDevices.Get (1)->GetIfIndex ());
+  socketFrom1to0.SetPhysicalAddress (ofdmDevices.Get (0)->GetAddress ());
+  socketFrom1to0.SetProtocol (1);
 
-  OnOffHelper onoff ("ns3::PacketSocketFactory", Address (socket));
-  onoff.SetAttribute ("OnTime", StringValue ("ns3::ExponentialRandomVariable[Mean=0.04]"));
-  onoff.SetAttribute ("OffTime", StringValue ("ns3::ExponentialRandomVariable[Mean=0.01]"));
-  onoff.SetAttribute ("DataRate", DataRateValue (DataRate ("0.4Mbps")));
+  OnOffHelper onoff ("ns3::PacketSocketFactory", Address (socketFrom1to0));
+  onoff.SetAttribute ("OnTime", StringValue ("ns3::UniformRandomVariable[Min=2|Max=10]"));
+  onoff.SetAttribute ("OffTime", StringValue ("ns3::UniformRandomVariable[Min=7|Max=10]"));
+  onoff.SetAttribute ("DataRate", DataRateValue (DataRate ("10Kbps")));
   onoff.SetAttribute ("PacketSize", UintegerValue (1500));
 
-  ApplicationContainer apps = onoff.Install (puNodes.Get (0));
+  ApplicationContainer apps = onoff.Install (puNodes.Get (1));
   apps.Start (Seconds (0.0));
   apps.Stop (Seconds (simTime));
 
-  Ptr<Socket> recvSink = SetupPacketReceive (puNodes.Get (1));
+  /* Setup simulation to send data from node 2 to node 0 */
+  PacketSocketAddress socketFrom2to0;
+  socketFrom2to0.SetSingleDevice (ofdmDevices.Get (2)->GetIfIndex ());
+  socketFrom2to0.SetPhysicalAddress (ofdmDevices.Get (0)->GetAddress ());
+  socketFrom2to0.SetProtocol (1);
+
+  OnOffHelper onoff2 ("ns3::PacketSocketFactory", Address (socketFrom2to0));
+  onoff2.SetAttribute ("OnTime", StringValue ("ns3::UniformRandomVariable[Min=2|Max=10]"));
+  onoff2.SetAttribute ("OffTime", StringValue ("ns3::UniformRandomVariable[Min=5|Max=10]"));
+  onoff2.SetAttribute ("DataRate", DataRateValue (DataRate ("10Kbps")));
+  onoff2.SetAttribute ("PacketSize", UintegerValue (1500));
+
+  ApplicationContainer apps2 = onoff2.Install (puNodes.Get (2));
+  apps2.Start (Seconds (simTime/3));
+  apps2.Stop (Seconds (2*simTime/3));
+
+  /* Setup simulation to send data from node 3 to node 0 */
+  PacketSocketAddress socketFrom3to0;
+  socketFrom3to0.SetSingleDevice (ofdmDevices.Get (3)->GetIfIndex ());
+  socketFrom3to0.SetPhysicalAddress (ofdmDevices.Get (0)->GetAddress ());
+  socketFrom3to0.SetProtocol (1);
+
+  OnOffHelper onoff3 ("ns3::PacketSocketFactory", Address (socketFrom3to0));
+  onoff3.SetAttribute ("OnTime", StringValue ("ns3::UniformRandomVariable[Min=2|Max=10]"));
+  onoff3.SetAttribute ("OffTime", StringValue ("ns3::UniformRandomVariable[Min=2|Max=10]"));
+  onoff3.SetAttribute ("DataRate", DataRateValue (DataRate ("10Kbps")));
+  onoff3.SetAttribute ("PacketSize", UintegerValue (1500));
+
+  ApplicationContainer apps3 = onoff3.Install (puNodes.Get (3));
+  apps3.Start (Seconds (2*simTime/3 + 1));
+  apps3.Stop (Seconds (simTime));
+
+  Ptr<Socket> recvSink = SetupPacketReceive (puNodes.Get (0));
 
   /******************* Configure noise generator *******************/
   Ptr<SpectrumValue> mwoPsd =  MicrowaveOvenSpectrumValueHelper::CreatePowerSpectralDensityMwo1 ();
@@ -228,7 +312,7 @@ int main (int argc, char** argv)
   spectrumAnalyzerHelper.SetRxSpectrumModel (SpectrumModelIsm2400MhzRes1Mhz);
   spectrumAnalyzerHelper.SetPhyAttribute ("Resolution", TimeValue (MilliSeconds (100)));
   spectrumAnalyzerHelper.SetPhyAttribute ("NoisePowerSpectralDensity", DoubleValue (1e-15));  // -120 dBm/Hz
-  spectrumAnalyzerHelper.EnableAsciiAll ("outputs/spectrum-analyzer-output");
+  spectrumAnalyzerHelper.EnableAsciiAll (suSensingFileNameFrefix);
   NetDeviceContainer spectrumAnalyzerDevices = spectrumAnalyzerHelper.Install (suNodes);
 
   /*
@@ -248,31 +332,92 @@ int main (int argc, char** argv)
 
   Config::Connect ("/NodeList/*/DeviceList/*/Phy/TxStart", MakeCallback (&PhyTxStartTrace));
   Config::Connect ("/NodeList/*/DeviceList/*/Phy/TxEnd", MakeCallback (&PhyTxEndTrace));
-  Config::Connect ("/NodeList/*/DeviceList/*/Phy/RxStart", MakeCallback (&PhyRxStartTrace));
-  Config::Connect ("/NodeList/*/DeviceList/*/Phy/RxEndOk", MakeCallback (&PhyRxEndOkTrace));
-  Config::Connect ("/NodeList/*/DeviceList/*/Phy/RxEndError", MakeCallback (&PhyRxEndErrorTrace));
+//  Config::Connect ("/NodeList/*/DeviceList/*/Phy/RxStart", MakeCallback (&PhyRxStartTrace));
+//  Config::Connect ("/NodeList/*/DeviceList/*/Phy/RxEndOk", MakeCallback (&PhyRxEndOkTrace));
+//  Config::Connect ("/NodeList/*/DeviceList/*/Phy/RxEndError", MakeCallback (&PhyRxEndErrorTrace));
 
   /* Anim */
   acss_anim test_anim("test.xml");
 
-//  for (int count = 0; count < numOfPUs; count++) {
-//      test_anim.update_pu_icon(puNodes.Get(count)->GetId());
-//  }
-//
-//  for (int count = 0; count < numOfSUs; count++) {
-//      test_anim.update_su_icon(suNodes.Get(count)->GetId());
-//  }
-//
-//  for (int count = 0; count < numOfSUs; count++) {
-//      test_anim.update_noise_gen_icon(noiseGeneratorNodes.Get(count)->GetId());
-//  }
+  for (int count = 0; count < numOfPUs; count++) {
+      test_anim.update_pu_icon(puNodes.Get(count)->GetId());
+  }
 
-  Simulator::Stop (Seconds (simTime));
+  for (int count = 0; count < numOfSUs; count++) {
+      test_anim.update_su_icon(suNodes.Get(count)->GetId());
+  }
+
+  for (int count = 0; count < numOfNoiseGenerator; count++) {
+      test_anim.update_noise_gen_icon(noiseGeneratorNodes.Get(count)->GetId());
+  }
+
+  Simulator::Stop (Seconds(simTime));
 
   Simulator::Run ();
 
   Simulator::Destroy ();
 
+  /* Post simulation files handling */
+  /* Extract PU activities */
+//  double time_frame = 0; // in seconds
+//
+//  /* open output file */
+//  puTimeFrameFilename
+//  for (time_frame = 0; time_frame < simTime; time_frame += 0.1) {
+//
+//  }
+
+  /* Extract SUs energy vectors */
+  ofstream energyVectorFile;
+  energyVectorFile.open(suEngeryVectorFileName, ios::out | ios::trunc);
+
+  /* Open SUs trace files */
+  ifstream suFiles[numOfSUs];
+
+  for (int count = 0; count < numOfSUs; count++) {
+    string filename = suSensingFileNameFrefix;
+    filename +="-" + SSTR(suNodes.Get(count)->GetId()) + suSensingFileNameSuffix;
+
+    cout << "opening " << filename << endl;
+    suFiles[count].open(filename.c_str());
+  }
+
+  for (double time_frame = 0.1; time_frame < simTime; time_frame += 0.1) {
+    /* Write timeframe to output file */
+    energyVectorFile << time_frame << " ";
+    cout << "at time frame " << time_frame << endl;
+
+    for (int count = 0; count < numOfSUs; count++) {
+      if (suFiles[count].is_open()) {
+        double readTimeFrame;
+        double readFreq, readPower;
+
+        while (!suFiles[count].eof()) {
+          suFiles[count] >> readTimeFrame >> readFreq >> readPower;
+
+          if ((readFreq == 2.435e+09)) {
+            cout << "SU " << SSTR(suNodes.Get(count)->GetId()) << " found a right energy" << endl;
+            cout << readTimeFrame << " " << readFreq << " " << readPower << endl;
+            energyVectorFile << readPower << " ";
+
+            break;
+          }
+        }
+      }
+      else {
+        cout << "Can't open su " << suNodes.Get(count)->GetId() << endl;
+      }
+    }
+
+    /* end one energy vector */
+    energyVectorFile << endl;
+  }
+
+  for (int count = 0; count < numOfSUs; count++) {
+    suFiles[count].close();
+  }
+
+  energyVectorFile.close();
 }
 
 

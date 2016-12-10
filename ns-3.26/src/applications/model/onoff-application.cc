@@ -252,7 +252,7 @@ void OnOffApplication::ScheduleStartEvent ()
   NS_LOG_FUNCTION (this);
 
   Time offInterval = Seconds (m_offTime->GetValue ());
-  NS_LOG_LOGIC ("start at " << offInterval);
+  NS_LOG_LOGIC ("start at " << offInterval.GetSeconds());
   m_startStopEvent = Simulator::Schedule (offInterval, &OnOffApplication::StartSending, this);
 }
 
@@ -261,7 +261,7 @@ void OnOffApplication::ScheduleStopEvent ()
   NS_LOG_FUNCTION (this);
 
   Time onInterval = Seconds (m_onTime->GetValue ());
-  NS_LOG_LOGIC ("stop at " << onInterval);
+  NS_LOG_LOGIC ("stop at " << onInterval.GetSeconds());
   m_startStopEvent = Simulator::Schedule (onInterval, &OnOffApplication::StopSending, this);
 }
 

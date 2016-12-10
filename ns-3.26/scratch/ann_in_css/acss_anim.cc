@@ -21,8 +21,8 @@ static const uint32_t pu_size = 2;
 static const char su_icon_path[] = "images/su.png";
 static const uint32_t su_size = 2;
 
-static const char ng_icon_path[] = "images/noise.png";
-static const uint32_t ng_size = 5;
+static const char ng_icon_path[] = "images/bs.png";
+static const uint32_t ng_size = 2;
 
 /*----------------------------------------------------------------------------*/
 acss_anim::acss_anim(const std::string anim_file_name) {
@@ -58,8 +58,8 @@ void acss_anim::update_su_icon(uint32_t node_id) {
 
 /*----------------------------------------------------------------------------*/
 void acss_anim::update_noise_gen_icon(uint32_t node_id) {
-  anim_p->UpdateNodeImage(node_id, noise_gen_icon_id);
-  //anim_p->UpdateNodeColor(node_id, 0, 0, 255); /* Blue */
+  //anim_p->UpdateNodeImage(node_id, noise_gen_icon_id);
+  anim_p->UpdateNodeColor(node_id, 0, 0, 255); /* Blue */
 
   anim_p->UpdateNodeSize(node_id, ng_size, ng_size);
 }

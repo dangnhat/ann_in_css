@@ -4,13 +4,13 @@
 PROGRAM=ann_in_css
 
 # waff function
-export NS3DIR=${PWD}../../
+export NS3DIR=${PWD}/../../
 export CPUCORES=$(shell nproc)
 
 WAFF=sh -c '\
     CWD="${PWD}";\
     cd ${NS3DIR} >/dev/null;\
-    ./waf --cwd="${CWD}"  --run ${PROGRAM} -j${CPUCORES};\
+    ./waf --cwd="${PWD}"  --run ${PROGRAM} -j${CPUCORES};\
     cd - >/dev/null'
 
 WAFFCLEAN=sh -c '\
