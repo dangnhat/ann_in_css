@@ -241,7 +241,6 @@ int main (int argc, char** argv)
   packetSocket.Install (puNodes);
 
   PacketSocketAddress socketTo0[numOfPUs - 1];
-  OnOffHelper onOffs[numOfPUs - 1];
   ApplicationContainer apps[numOfPUs - 1];
 
   Ptr<UniformRandomVariable> startTimeRNG = CreateObject<UniformRandomVariable> ();
@@ -257,12 +256,13 @@ int main (int argc, char** argv)
       socketTo0[pu_count].SetPhysicalAddress (ofdmDevices.Get (0)->GetAddress ());
       socketTo0[pu_count].SetProtocol (1);
 
-      onOffs[pu_count].SetAttribute ("OnTime", StringValue ("ns3::UniformRandomVariable[Min=2|Max=5]"));
-      onOffs[pu_count].SetAttribute ("OffTime", StringValue ("ns3::UniformRandomVariable[Min=10|Max=15]"));
-      onOffs[pu_count].SetAttribute ("DataRate", DataRateValue (DataRate ("10Kbps")));
-      onOffs[pu_count].SetAttribute ("PacketSize", UintegerValue (1500));
+      OnOffHelper onOff ("ns3::PacketSocketFactory", Address (socketTo0[pu_count]));
+      onOff.SetAttribute ("OnTime", StringValue ("ns3::UniformRandomVariable[Min=2|Max=5]"));
+      onOff.SetAttribute ("OffTime", StringValue ("ns3::UniformRandomVariable[Min=10|Max=15]"));
+      onOff.SetAttribute ("DataRate", DataRateValue (DataRate ("10Kbps")));
+      onOff.SetAttribute ("PacketSize", UintegerValue (1500));
 
-      apps[pu_count] = onOffs[pu_count].Install (puNodes.Get (pu_count));
+      apps[pu_count] = onOff.Install (puNodes.Get (pu_count));
       apps[pu_count].Start (Seconds (startTimeRNG->GetValue ()));
       apps[pu_count].Stop (Seconds (endTimeRNG->GetValue ()));
   }
@@ -397,6 +397,6 @@ int main (int argc, char** argv)
 //  }
 //
 //  energyVectorFile.close();
-//}
+}
 
 
